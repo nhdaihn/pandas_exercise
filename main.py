@@ -1,6 +1,11 @@
 # coding=utf-8
 import pandas as pd
 
+pd.options.display.width = None
+pd.options.display.max_columns = None
+pd.set_option('display.max_rows', 3000)
+pd.set_option('display.max_columns', 3000)
+
 # read prices.csv
 prices_df = pd.read_csv(r'prices.csv')
 # read sales.csv
@@ -28,75 +33,33 @@ for i in range(len(filter_result)):
     # thêm row bên trên vào dataframe prices_df ban đầu.
     prices_df = prices_df.append(new_row, ignore_index=True)
 
-# sau khi thêm thì những data vừa thêm đang xếp ở cuối danh sách, nên cần sort lại(tí nữa là loop cái dataframe này :3)
+# sau khi thêm thì những data vừa thêm đang xếp ở cuối danh sách, nên cần sort lại.
 prices_df_sort_result = prices_df.sort_values(by=['product_id', 'updated_at']).reset_index(drop=True)
 
-# khởi tạo mảng rỗng để sau khi cho hết data vào mảng này thì sẽ convert cái mảng này thành dataframe và in ra màn hình
-calculate_result = []
+# XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX thảo luận bắt đầu từ đây
+# phải convert ordered_at thành kiểu datetime thì mới merge_asof được. Các line dưới lý do tương tụ :)
+sales_df.ordered_at = pd.to_datetime(sales_df.ordered_at)
 
-# bắt đầu logic tính toán
-# loop tất cả các phần tử của dataframe prices_df_sort_result i bắt đầu từ 0
-for i in range(len(prices_df_sort_result)):
-    # lấy product id của row i
-    product_id = prices_df_sort_result.loc[i, "product_id"]
+# phải convert updated_at thành kiểu datetime
+prices_df_sort_result.updated_at = pd.to_datetime(prices_df_sort_result.updated_at)
 
-    # lấy ngày mà product đấy thay đổi giá của row i
-    updated_at = prices_df_sort_result.loc[i, "updated_at"]
+# phải order theo ordered_at
+sales_df_orderby = sales_df.sort_values('ordered_at')
 
-    # lấy giá cũ của sản phẩm của row i
-    old_price = prices_df_sort_result.loc[i, "old_price"]
+# phải order theo updated_at
+prices_df_sort_result_order_by = prices_df_sort_result.sort_values('updated_at')
 
-    # lấy giá mới của sản phẩmcủa row i
-    new_price = prices_df_sort_result.loc[i, "new_price"]
+# join 2 bảng theo product id và lấy giá trị gần nhất của ordered_at và updated_at
+join_result = pd.merge_asof(sales_df_orderby, prices_df_sort_result_order_by, by='product_id',
+                            left_on=['ordered_at'], right_on=['updated_at'])
 
-    # khởi tạo một biến sẽ chứa cái product id của row tiếp theo(row i + 1)
-    product_id_next = None
+# group xong thì kq sẽ thành 1 cái dataframe mới có 3 column product_id, new_price, quantity_ordered
+group_result = join_result.groupby(["product_id", "new_price"])["quantity_ordered"].count().reset_index()
 
-    # Tương tự :)
-    updated_at_next = None
+# tạo ra column mới là tổng của quantity_ordered và new_price
+revenue = group_result["new_price"] * group_result["quantity_ordered"]
+group_result["revenue"] = revenue
 
-    # Chỗ này cần check if vì nếu loop i chạy đến phần tử cuối cùng thì bị tràn index.
-    # Kiểu có 10 row mà c cứ cố get dữ liệu của row 11 thì chương trình bị lỗi
-    if i + 1 != len(prices_df_sort_result):
-        # Lấy product id của row tiếp theo i + 1
-        product_id_next = prices_df_sort_result.loc[i + 1, "product_id"]
+# in ra màn hình và suy đoán !!!
+print (group_result)
 
-        # Tượng tự :) :)
-        updated_at_next = prices_df_sort_result.loc[i + 1, "updated_at"]
-
-    # Nếu product_id_next(id của row tiếp theo) mà k bằng id của row hiện tại
-    # có nghĩa là là row này là row cuối cùng của nhóm r đấy
-    if product_id_next != product_id:
-        # lọc các row trong data frame sales_df có id >= updated_at
-        # vì là row cuối cùng nên k có updated_at_next
-        # k có lần update tiếp theo nữa đấy
-        sales = sales_df.loc[(sales_df['product_id'] == product_id) &
-                             (sales_df['ordered_at'] >= updated_at)]
-
-        # tính toán doanh thu. Lấy tổng của quantity_ordered nhân với giá là được
-        revenue = (sales["quantity_ordered"].sum()) * new_price
-
-        # tạo ra item mới để add item này vào mảng calculate_result
-        data_item = (product_id, old_price, new_price, updated_at, "null", revenue)
-
-        # add item này vào mảng
-        calculate_result.append(data_item)
-    # còn không thì ngược lại id của row tiếp theo đang bằng id của row hiện tại
-    # nghĩa là là chưa phải item cuối cùng của nhóm
-    else:
-        # lọc các row trong data frame sales_df có id >= updated_at và < updated_at_next
-        # lọc sale trong khoảng time đấy c
-        sales = sales_df.loc[(sales_df['product_id'] == product_id) &
-                             (sales_df['ordered_at'] >= updated_at) &
-                             (sales_df['ordered_at'] < updated_at_next)]
-
-        revenue = (sales["quantity_ordered"].sum()) * new_price
-        data_item = (product_id, old_price, new_price, updated_at, updated_at_next, revenue)
-        calculate_result.append(data_item)
-
-# Add(covert) cái mảng mk vừa tính toán trong vòng for bên trên vào dataframe ( Tạo dataframe có các columns là ... ý)
-final_result = pd.DataFrame(calculate_result, columns=['product_id', 'old_price', 'new_price','updated_at',
-                                                       'updated_at_next','revenue'])
-
-# In dataframe ra màn hình. Done <3 <3. K biết big data có lỗi k nhỉ :3
-print (final_result)
